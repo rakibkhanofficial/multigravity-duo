@@ -1,0 +1,1449 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+shopt -s nullglob 2>/dev/null || true
+
+BASE="${MULTIGRAVITY_HOME:-$HOME/AntigravityProfiles}"
+cmd="${1-}"
+
+abort() {
+  echo "Error: $1" >&2
+  exit 1
+}
+
+print_info() {
+  echo "$1"
+}
+
+platform() {
+  local raw
+  raw="${MULTIGRAVITY_PLATFORM-}"
+  if [ -z "$raw" ]; then
+    raw="$(uname -s)"
+  fi
+
+  raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+
+  case "$raw" in
+    darwin | macos | mac | osx)
+      printf '%s\n' "darwin"
+      ;;
+    linux)
+      printf '%s\n' "linux"
+      ;;
+    *)
+      abort "unsupported platform '$raw'. Multigravity Duo supports macOS and Linux."
+      ;;
+  esac
+}
+
+profile_dir() {
+  printf '%s/%s\n' "$BASE" "$1"
+}
+
+# --- IDE Paths ---
+ide_user_data_dir() {
+  local profile_path=$1
+  case "$(platform)" in
+    darwin)
+      printf '%s/Library/Application Support/Antigravity IDE\n' "$profile_path"
+      ;;
+    linux)
+      printf '%s/.config/Antigravity IDE\n' "$profile_path"
+      ;;
+  esac
+}
+
+ide_extensions_dir() {
+  local profile_path=$1
+  printf '%s/.antigravity-ide/extensions\n' "$profile_path"
+}
+
+default_ide_user_data_dir() {
+  case "$(platform)" in
+    darwin)
+      printf '%s/Library/Application Support/Antigravity IDE\n' "$HOME"
+      ;;
+    linux)
+      printf '%s/.config/Antigravity IDE\n' "$HOME"
+      ;;
+  esac
+}
+
+default_ide_extensions_dir() {
+  printf '%s/.antigravity-ide/extensions\n' "$HOME"
+}
+
+# --- Chat (Antigravity Companion) Paths ---
+chat_user_data_dir() {
+  local profile_path=$1
+  case "$(platform)" in
+    darwin)
+      printf '%s/Library/Application Support/Antigravity\n' "$profile_path"
+      ;;
+    linux)
+      printf '%s/.config/Antigravity\n' "$profile_path"
+      ;;
+  esac
+}
+
+chat_extensions_dir() {
+  local profile_path=$1
+  printf '%s/.antigravity/extensions\n' "$profile_path"
+}
+
+default_chat_user_data_dir() {
+  case "$(platform)" in
+    darwin)
+      printf '%s/Library/Application Support/Antigravity\n' "$HOME"
+      ;;
+    linux)
+      printf '%s/.config/Antigravity\n' "$HOME"
+      ;;
+  esac
+}
+
+default_chat_extensions_dir() {
+  printf '%s/.antigravity/extensions\n' "$HOME"
+}
+
+templates_dir() {
+  printf '%s/.templates\n' "$BASE"
+}
+
+is_auth_only() {
+  [ -f "$(profile_dir "$1")/.auth-only" ]
+}
+
+linux_launcher_dir() {
+  printf '%s/.local/share/multigravity/launchers\n' "$HOME"
+}
+
+linux_launcher_path() {
+  local target_app=${2:-ide}
+  if [ "$target_app" = "ide" ]; then
+    printf '%s/%s-ide.sh\n' "$(linux_launcher_dir)" "$1"
+  elif [ "$target_app" = "chat" ]; then
+    printf '%s/%s-chat.sh\n' "$(linux_launcher_dir)" "$1"
+  else
+    printf '%s/%s-duo.sh\n' "$(linux_launcher_dir)" "$1"
+  fi
+}
+
+linux_desktop_path() {
+  local target_app=${2:-ide}
+  if [ "$target_app" = "ide" ]; then
+    printf '%s/.local/share/applications/multigravity-%s-ide.desktop\n' "$HOME" "$1"
+  elif [ "$target_app" = "chat" ]; then
+    printf '%s/.local/share/applications/multigravity-%s-chat.desktop\n' "$HOME" "$1"
+  else
+    printf '%s/.local/share/applications/multigravity-%s-duo.desktop\n' "$HOME" "$1"
+  fi
+}
+
+mac_shortcut_path() {
+  local profile=$1
+  local target_app=${2:-ide}
+  if [ "$target_app" = "ide" ]; then
+    printf '%s/Applications/Multigravity %s IDE.app\n' "$HOME" "$profile"
+  elif [ "$target_app" = "chat" ]; then
+    printf '%s/Applications/Multigravity %s.app\n' "$HOME" "$profile"
+  else
+    printf '%s/Applications/Multigravity %s Duo.app\n' "$HOME" "$profile"
+  fi
+}
+
+validate_name() {
+  local name=$1
+
+  if [[ -z "$name" ]]; then
+    abort "profile name required"
+  fi
+
+  if ! [[ "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ ]]; then
+    abort "profile name must start with alphanumeric and contain only letters, numbers, or hyphens"
+  fi
+}
+
+command_or_path() {
+  local candidate=$1
+
+  if [ -z "$candidate" ]; then
+    return 1
+  fi
+
+  if [ -d "$candidate" ] || [ -x "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  if command -v "$candidate" >/dev/null 2>&1; then
+    command -v "$candidate"
+    return 0
+  fi
+
+  return 1
+}
+
+# --- Find Antigravity IDE ---
+find_ide_app() {
+  local override candidate
+
+  override="${MULTIGRAVITY_IDE_APP-}"
+  if [ -n "$override" ] && command_or_path "$override" >/dev/null 2>&1; then
+    command_or_path "$override"
+    return 0
+  fi
+
+  case "$(platform)" in
+    darwin)
+      for candidate in \
+        "/Applications/Antigravity IDE.app" \
+        "$HOME/Applications/Antigravity IDE.app"
+      do
+        if [ -d "$candidate" ]; then
+          printf '%s\n' "$candidate"
+          return 0
+        fi
+      done
+      ;;
+    linux)
+      for candidate in \
+        "antigravity-ide" \
+        "/usr/share/antigravity-ide/antigravity-ide" \
+        "/usr/bin/antigravity-ide" \
+        "/usr/local/bin/antigravity-ide" \
+        "$HOME/.local/bin/antigravity-ide" \
+        "$HOME/Applications/Antigravity-IDE.AppImage"
+      do
+        if command_or_path "$candidate" >/dev/null 2>&1; then
+          command_or_path "$candidate"
+          return 0
+        fi
+      done
+      ;;
+  esac
+
+  return 1
+}
+
+# --- Find Antigravity Chat (Companion) ---
+find_chat_app() {
+  local override candidate
+
+  override="${MULTIGRAVITY_CHAT_APP:-${MULTIGRAVITY_APP-}}"
+  if [ -n "$override" ] && command_or_path "$override" >/dev/null 2>&1; then
+    command_or_path "$override"
+    return 0
+  fi
+
+  case "$(platform)" in
+    darwin)
+      for candidate in \
+        "/Applications/Antigravity.app" \
+        "$HOME/Applications/Antigravity.app"
+      do
+        if [ -d "$candidate" ]; then
+          printf '%s\n' "$candidate"
+          return 0
+        fi
+      done
+      ;;
+    linux)
+      for candidate in \
+        "antigravity" \
+        "/usr/share/antigravity/antigravity" \
+        "/usr/bin/antigravity" \
+        "/usr/local/bin/antigravity" \
+        "$HOME/.local/bin/antigravity" \
+        "$HOME/Applications/Antigravity.AppImage"
+      do
+        if command_or_path "$candidate" >/dev/null 2>&1; then
+          command_or_path "$candidate"
+          return 0
+        fi
+      done
+      ;;
+  esac
+
+  return 1
+}
+
+require_ide_app() {
+  local app
+  if ! app="$(find_ide_app)"; then
+    case "$(platform)" in
+      darwin)
+        abort "Antigravity IDE.app was not found. Install Antigravity IDE or set MULTIGRAVITY_IDE_APP."
+        ;;
+      linux)
+        abort "Antigravity IDE was not found. Install Antigravity IDE or set MULTIGRAVITY_IDE_APP."
+        ;;
+    esac
+  fi
+  printf '%s\n' "$app"
+}
+
+require_chat_app() {
+  local app
+  if ! app="$(find_chat_app)"; then
+    case "$(platform)" in
+      darwin)
+        abort "Antigravity.app (Chat) was not found. Install Antigravity or set MULTIGRAVITY_CHAT_APP."
+        ;;
+      linux)
+        abort "Antigravity was not found. Install Antigravity or set MULTIGRAVITY_CHAT_APP."
+        ;;
+    esac
+  fi
+  printf '%s\n' "$app"
+}
+
+create_profile_layout() {
+  local profile_path=$1
+
+  mkdir -p "$profile_path"
+  mkdir -p "$(ide_extensions_dir "$profile_path")"
+  mkdir -p "$(chat_extensions_dir "$profile_path")"
+  mkdir -p "$profile_path/.gemini"
+
+  case "$(platform)" in
+    darwin)
+      mkdir -p "$profile_path/Library/Application Support/Antigravity IDE"
+      mkdir -p "$profile_path/Library/Application Support/Antigravity"
+
+      if [ ! -e "$profile_path/Library/Keychains" ] && [ -d "$HOME/Library/Keychains" ]; then
+        ln -s "$HOME/Library/Keychains" "$profile_path/Library/Keychains"
+      fi
+      ;;
+    linux)
+      mkdir -p \
+        "$profile_path/.config/Antigravity IDE" \
+        "$profile_path/.config/Antigravity" \
+        "$profile_path/.cache" \
+        "$profile_path/.local/share" \
+        "$profile_path/.local/state"
+      ;;
+  esac
+}
+
+create_auth_only_layout() {
+  local profile_path=$1
+  local def_ide_data def_ide_ext def_chat_data def_chat_ext
+
+  def_ide_data="$(default_ide_user_data_dir)"
+  def_ide_ext="$(default_ide_extensions_dir)"
+  def_chat_data="$(default_chat_user_data_dir)"
+  def_chat_ext="$(default_chat_extensions_dir)"
+
+  mkdir -p "$profile_path"
+  touch "$profile_path/.auth-only"
+  mkdir -p "$profile_path/.gemini"
+
+  # 1. Antigravity IDE Setup
+  local ide_data
+  ide_data="$(ide_user_data_dir "$profile_path")"
+  mkdir -p "$ide_data/User"
+  if [ -d "$def_ide_data/User" ]; then
+    for item in settings.json keybindings.json snippets; do
+      local src="$def_ide_data/User/$item"
+      local dest="$ide_data/User/$item"
+      if [ -e "$src" ] && [ ! -e "$dest" ]; then
+        ln -s "$src" "$dest"
+      fi
+    done
+  fi
+
+  local ide_ext
+  ide_ext="$(ide_extensions_dir "$profile_path")"
+  mkdir -p "$(dirname "$ide_ext")"
+  if [ -d "$def_ide_ext" ]; then
+    rm -rf "$ide_ext" 2>/dev/null || true
+    ln -s "$def_ide_ext" "$ide_ext"
+  else
+    mkdir -p "$ide_ext"
+  fi
+
+  # 2. Antigravity Chat Setup
+  local chat_data
+  chat_data="$(chat_user_data_dir "$profile_path")"
+  mkdir -p "$chat_data/User"
+  if [ -d "$def_chat_data/User" ]; then
+    for item in settings.json keybindings.json snippets; do
+      local src="$def_chat_data/User/$item"
+      local dest="$chat_data/User/$item"
+      if [ -e "$src" ] && [ ! -e "$dest" ]; then
+        ln -s "$src" "$dest"
+      fi
+    done
+  fi
+
+  local chat_ext
+  chat_ext="$(chat_extensions_dir "$profile_path")"
+  mkdir -p "$(dirname "$chat_ext")"
+  if [ -d "$def_chat_ext" ]; then
+    rm -rf "$chat_ext" 2>/dev/null || true
+    ln -s "$def_chat_ext" "$chat_ext"
+  else
+    mkdir -p "$chat_ext"
+  fi
+
+  # OS-specific dirs & keychains
+  case "$(platform)" in
+    darwin)
+      mkdir -p "$profile_path/Library/Application Support"
+      if [ ! -e "$profile_path/Library/Keychains" ] && [ -d "$HOME/Library/Keychains" ]; then
+        ln -s "$HOME/Library/Keychains" "$profile_path/Library/Keychains"
+      fi
+      ;;
+    linux)
+      mkdir -p \
+        "$profile_path/.cache" \
+        "$profile_path/.local/share" \
+        "$profile_path/.local/state"
+      ;;
+  esac
+}
+
+script_path() {
+  local installed dir
+
+  installed="$(command -v multigravity 2>/dev/null || true)"
+  if [ -n "$installed" ]; then
+    printf '%s\n' "$installed"
+    return 0
+  fi
+
+  dir="$(cd "$(dirname "$0")" && pwd)"
+  printf '%s/%s\n' "$dir" "$(basename "$0")"
+}
+
+shell_quote() {
+  printf '%q' "$1"
+}
+
+desktop_quote() {
+  local value=$1
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//\$/\\$}
+  value=${value//\`/\\\`}
+  printf '"%s"' "$value"
+}
+
+create_shortcut_darwin_single() {
+  local profile=$1
+  local app_type=$2 # ide, chat, duo
+  local app_dir
+  local run_script
+  local launcher
+  local icon_src
+  local app_title
+  local bundle_id
+  local launch_flag
+
+  launcher="$(script_path)"
+  icon_src="$(dirname "$launcher")/icon.icns"
+
+  if [ "$app_type" = "ide" ]; then
+    app_title="Multigravity $profile IDE"
+    bundle_id="com.multigravity.profile.$profile.ide"
+    launch_flag="--ide"
+  elif [ "$app_type" = "chat" ]; then
+    app_title="Multigravity $profile"
+    bundle_id="com.multigravity.profile.$profile.chat"
+    launch_flag="--chat"
+  else
+    app_title="Multigravity $profile Duo"
+    bundle_id="com.multigravity.profile.$profile.duo"
+    launch_flag="--all"
+  fi
+
+  app_dir="$(mac_shortcut_path "$profile" "$app_type")"
+  run_script="$app_dir/Contents/MacOS/run"
+
+  mkdir -p "$app_dir/Contents/MacOS"
+  mkdir -p "$app_dir/Contents/Resources"
+
+  cat <<EOF > "$run_script"
+#!/usr/bin/env bash
+export MULTIGRAVITY_HOME=$(shell_quote "$BASE")
+exec $(shell_quote "$launcher") $(shell_quote "$profile") "$launch_flag" "\$@"
+EOF
+
+  chmod +x "$run_script"
+
+  if [ -f "$icon_src" ]; then
+    cp "$icon_src" "$app_dir/Contents/Resources/icon.icns"
+  fi
+
+  cat <<EOF > "$app_dir/Contents/Info.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+"http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>run</string>
+  <key>CFBundleIconFile</key>
+  <string>icon</string>
+  <key>CFBundleIdentifier</key>
+  <string>$bundle_id</string>
+  <key>CFBundleName</key>
+  <string>$app_title</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+</dict>
+</plist>
+EOF
+
+  print_info "Shortcut created: $app_dir"
+}
+
+create_shortcut_linux_single() {
+  local profile=$1
+  local app_type=$2 # ide, chat, duo
+  local launcher_root
+  local launcher_path
+  local desktop_path
+  local launcher
+  local launch_flag
+  local app_title
+
+  launcher_root="$(linux_launcher_dir)"
+  launcher_path="$(linux_launcher_path "$profile" "$app_type")"
+  desktop_path="$(linux_desktop_path "$profile" "$app_type")"
+  launcher="$(script_path)"
+
+  if [ "$app_type" = "ide" ]; then
+    app_title="Multigravity $profile (IDE)"
+    launch_flag="--ide"
+  elif [ "$app_type" = "chat" ]; then
+    app_title="Multigravity $profile (Chat)"
+    launch_flag="--chat"
+  else
+    app_title="Multigravity $profile (Duo)"
+    launch_flag="--all"
+  fi
+
+  mkdir -p "$launcher_root"
+  mkdir -p "$(dirname "$desktop_path")"
+
+  cat <<EOF > "$launcher_path"
+#!/usr/bin/env sh
+export MULTIGRAVITY_HOME=$(shell_quote "$BASE")
+exec $(shell_quote "$launcher") $(shell_quote "$profile") "$launch_flag" "\$@"
+EOF
+
+  chmod +x "$launcher_path"
+
+  cat <<EOF > "$desktop_path"
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=$app_title
+Comment=Launch $app_title Antigravity profile
+Exec=$(desktop_quote "$launcher_path") %F
+Icon=antigravity
+Terminal=false
+StartupNotify=false
+Categories=Development;IDE;Chat;
+EOF
+
+  print_info "Shortcut created: $desktop_path"
+}
+
+create_shortcuts() {
+  local profile=$1
+  case "$(platform)" in
+    darwin)
+      create_shortcut_darwin_single "$profile" "ide"
+      create_shortcut_darwin_single "$profile" "chat"
+      create_shortcut_darwin_single "$profile" "duo"
+      ;;
+    linux)
+      create_shortcut_linux_single "$profile" "ide"
+      create_shortcut_linux_single "$profile" "chat"
+      create_shortcut_linux_single "$profile" "duo"
+      ;;
+  esac
+}
+
+remove_shortcuts() {
+  local profile=$1
+  case "$(platform)" in
+    darwin)
+      for app_type in ide chat duo; do
+        local target
+        target="$(mac_shortcut_path "$profile" "$app_type")"
+        if [ -d "$target" ]; then
+          rm -rf "$target"
+          print_info "Removed shortcut: $target"
+        fi
+      done
+      ;;
+    linux)
+      for app_type in ide chat duo; do
+        local target
+        target="$(linux_launcher_path "$profile" "$app_type")"
+        if [ -f "$target" ]; then
+          rm -f "$target"
+          print_info "Removed launcher: $target"
+        fi
+        target="$(linux_desktop_path "$profile" "$app_type")"
+        if [ -f "$target" ]; then
+          rm -f "$target"
+          print_info "Removed shortcut: $target"
+        fi
+      done
+      ;;
+  esac
+}
+
+launch_ide_app() {
+  local profile=$1
+  shift || true
+
+  local profile_path app data_dir ext_dir
+  profile_path="$(profile_dir "$profile")"
+  app="$(require_ide_app)"
+  data_dir="$(ide_user_data_dir "$profile_path")"
+  ext_dir="$(ide_extensions_dir "$profile_path")"
+
+  print_info "Launching Antigravity IDE profile '$profile'..."
+
+  case "$(platform)" in
+    darwin)
+      HOME="$profile_path" open -n "$app" --args \
+        --user-data-dir "$data_dir" \
+        --extensions-dir "$ext_dir" \
+        "$@"
+      ;;
+    linux)
+      HOME="$profile_path" \
+      XDG_CONFIG_HOME="$profile_path/.config" \
+      XDG_CACHE_HOME="$profile_path/.cache" \
+      XDG_DATA_HOME="$profile_path/.local/share" \
+      XDG_STATE_HOME="$profile_path/.local/state" \
+      "$app" \
+        --user-data-dir "$data_dir" \
+        --extensions-dir "$ext_dir" \
+        "$@"
+      ;;
+  esac
+}
+
+launch_chat_app() {
+  local profile=$1
+  shift || true
+
+  local profile_path app data_dir ext_dir
+  profile_path="$(profile_dir "$profile")"
+  app="$(require_chat_app)"
+  data_dir="$(chat_user_data_dir "$profile_path")"
+  ext_dir="$(chat_extensions_dir "$profile_path")"
+
+  print_info "Launching Antigravity Chat profile '$profile'..."
+
+  case "$(platform)" in
+    darwin)
+      HOME="$profile_path" open -n "$app" --args \
+        --user-data-dir "$data_dir" \
+        --extensions-dir "$ext_dir" \
+        "$@"
+      ;;
+    linux)
+      HOME="$profile_path" \
+      XDG_CONFIG_HOME="$profile_path/.config" \
+      XDG_CACHE_HOME="$profile_path/.cache" \
+      XDG_DATA_HOME="$profile_path/.local/share" \
+      XDG_STATE_HOME="$profile_path/.local/state" \
+      "$app" \
+        --user-data-dir "$data_dir" \
+        --extensions-dir "$ext_dir" \
+        "$@"
+      ;;
+  esac
+}
+
+launch_profile() {
+  local profile=$1
+  shift || true
+
+  local target_mode="ide"
+  local forward_args=()
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --ide)
+        target_mode="ide"
+        ;;
+      --chat | --app)
+        target_mode="chat"
+        ;;
+      --all | --both | --duo)
+        target_mode="all"
+        ;;
+      *)
+        forward_args+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  local profile_path
+  profile_path="$(profile_dir "$profile")"
+  if [ ! -d "$profile_path" ]; then
+    abort "profile '$profile' does not exist. Run: multigravity new $profile"
+  fi
+
+  if is_auth_only "$profile"; then
+    create_auth_only_layout "$profile_path"
+  else
+    create_profile_layout "$profile_path"
+  fi
+
+  case "$target_mode" in
+    ide)
+      launch_ide_app "$profile" "${forward_args[@]+"${forward_args[@]}"}"
+      ;;
+    chat)
+      launch_chat_app "$profile" "${forward_args[@]+"${forward_args[@]}"}"
+      ;;
+    all)
+      launch_ide_app "$profile" "${forward_args[@]+"${forward_args[@]}"}"
+      launch_chat_app "$profile" "${forward_args[@]+"${forward_args[@]}"}"
+      ;;
+  esac
+}
+
+list_profiles() {
+  local entries=""
+  local dir
+  local raw=${1-}
+
+  if [ "$raw" != "--raw" ]; then
+    echo "Existing profiles:"
+  fi
+
+  if [ ! -d "$BASE" ]; then
+    if [ "$raw" != "--raw" ]; then
+      echo "(none)"
+    fi
+    return 0
+  fi
+
+  for dir in "$BASE"/*; do
+    [ -d "$dir" ] || continue
+    local name
+    name="$(basename "$dir")"
+    [ "$name" = ".templates" ] && continue
+    entries="${entries}${name}"$'\n'
+  done
+
+  if [ -z "$entries" ]; then
+    if [ "$raw" != "--raw" ]; then
+      echo "(none)"
+    fi
+  else
+    printf '%s' "$entries" | sort
+  fi
+}
+
+new_profile() {
+  local profile=""
+  local auth_only=false
+  local from_template=""
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --auth-only) auth_only=true ;;
+      --from) from_template="${2-}"; shift ;;
+      -*) abort "unknown option: $1" ;;
+      *) profile="$1" ;;
+    esac
+    shift
+  done
+
+  validate_name "$profile"
+
+  local profile_path
+  profile_path="$(profile_dir "$profile")"
+  if [ -d "$profile_path" ]; then
+    abort "profile '$profile' already exists"
+  fi
+
+  mkdir -p "$BASE"
+
+  if [ -n "$from_template" ]; then
+    local tpl_path
+    tpl_path="$(templates_dir)/$from_template"
+    if [ ! -d "$tpl_path" ]; then
+      abort "template '$from_template' does not exist. Run: multigravity template list"
+    fi
+    print_info "Creating profile '$profile' from template '$from_template'..."
+    cp -R "$tpl_path" "$profile_path"
+  elif [ "$auth_only" = true ]; then
+    create_auth_only_layout "$profile_path"
+  else
+    create_profile_layout "$profile_path"
+  fi
+
+  print_info "Created profile '$profile' (IDE & Companion layout initialized)"
+  create_shortcuts "$profile"
+}
+
+delete_profile() {
+  local profile=$1
+  local profile_path confirm
+
+  validate_name "$profile"
+
+  profile_path="$(profile_dir "$profile")"
+  if [ ! -d "$profile_path" ]; then
+    abort "profile '$profile' does not exist"
+  fi
+
+  read -r -p "Delete profile '$profile' and all its data? [y/N] " confirm
+  if [[ "$confirm" =~ ^[Yy]$ ]]; then
+    rm -rf "$profile_path"
+    remove_shortcuts "$profile"
+    print_info "Deleted profile '$profile'"
+  else
+    print_info "Aborted."
+  fi
+}
+
+rename_profile() {
+  local old=$1
+  local new=$2
+  local old_path new_path
+
+  validate_name "$old"
+  validate_name "$new"
+
+  old_path="$(profile_dir "$old")"
+  new_path="$(profile_dir "$new")"
+
+  if [ ! -d "$old_path" ]; then
+    abort "profile '$old' does not exist"
+  fi
+  if [ -d "$new_path" ]; then
+    abort "profile '$new' already exists"
+  fi
+
+  mv "$old_path" "$new_path"
+  remove_shortcuts "$old"
+  create_shortcuts "$new"
+
+  print_info "Renamed profile '$old' to '$new'"
+}
+
+clone_profile() {
+  local src=$1
+  local dest=$2
+  local src_path dest_path
+
+  validate_name "$src"
+  validate_name "$dest"
+
+  src_path="$(profile_dir "$src")"
+  dest_path="$(profile_dir "$dest")"
+
+  if [ ! -d "$src_path" ]; then
+    abort "source profile '$src' does not exist"
+  fi
+  if [ -d "$dest_path" ]; then
+    abort "destination profile '$dest' already exists"
+  fi
+
+  print_info "Cloning profile '$src' to '$dest'..."
+  cp -R "$src_path" "$dest_path"
+  create_shortcuts "$dest"
+
+  print_info "Successfully cloned '$src' to '$dest'"
+}
+
+doctor_cli() {
+  local errors=0
+  local warnings=0
+  local ide_found="" chat_found=""
+
+  print_info "Checking Multigravity Duo environment..."
+
+  # 1. Platform Check
+  if platform &>/dev/null; then
+    echo "  [✓] Platform: $(platform)"
+  else
+    echo "  [✗] Platform: Unknown"
+    errors=$((errors + 1))
+  fi
+
+  # 2. Antigravity IDE Check
+  if ide_found=$(find_ide_app); then
+    echo "  [✓] Antigravity IDE: Found at $ide_found"
+  else
+    echo "  [!] Antigravity IDE: Not found in standard locations."
+    warnings=$((warnings + 1))
+  fi
+
+  # 3. Antigravity Companion / Chat Check
+  if chat_found=$(find_chat_app); then
+    echo "  [✓] Antigravity (Chat): Found at $chat_found"
+  else
+    echo "  [!] Antigravity (Chat): Not found in standard locations."
+    warnings=$((warnings + 1))
+  fi
+
+  if [ -z "$ide_found" ] && [ -z "$chat_found" ]; then
+    echo "  [✗] Neither Antigravity IDE nor Antigravity app was detected."
+    errors=$((errors + 1))
+  fi
+
+  # 4. Path Check
+  local installed
+  installed="$(command -v multigravity 2>/dev/null || true)"
+  if [ -n "$installed" ]; then
+    echo "  [✓] Global Binary: $installed"
+  else
+    echo "  [!] Global Binary: Not found in PATH. Run install script or update PATH."
+    warnings=$((warnings + 1))
+  fi
+
+  # 5. Icon Check (macOS)
+  if [ "$(platform)" = "darwin" ]; then
+    local icon_path
+    icon_path="$(dirname "$(script_path)")/icon.icns"
+    if [ -f "$icon_path" ]; then
+      echo "  [✓] Application Icon: Found"
+    else
+      echo "  [!] Application Icon: Missing ($icon_path)."
+      warnings=$((warnings + 1))
+    fi
+  fi
+
+  # 6. Base Directory
+  if [ -d "$BASE" ]; then
+    if [ -w "$BASE" ]; then
+      echo "  [✓] Profile storage: $BASE (writable)"
+    else
+      echo "  [✗] Profile storage: $BASE (NOT writable)"
+      errors=$((errors + 1))
+    fi
+  else
+    echo "  [!] Profile storage: $BASE (Not yet created)"
+  fi
+
+  echo ""
+  if [ $errors -eq 0 ]; then
+    if [ $warnings -eq 0 ]; then
+      print_info "✓ Your Multigravity Duo environment looks perfect!"
+    else
+      print_info "Found $warnings warning(s). Multigravity Duo is operational."
+    fi
+  else
+    print_info "✗ Found $errors error(s) and $warnings warning(s). Please review the findings above."
+  fi
+}
+
+profile_stats() {
+  if [ ! -d "$BASE" ]; then
+    print_info "No profiles found."
+    return 0
+  fi
+
+  print_info "Multigravity Duo Profile Storage Breakdown:"
+  printf "%-18s %-10s %-12s %-12s %s\n" "PROFILE" "TOTAL" "IDE EXT" "CHAT EXT" "TYPE"
+  printf "%-18s %-10s %-12s %-12s %s\n" "-------" "-----" "-------" "--------" "----"
+
+  local dir
+  for dir in "$BASE"/*; do
+    [ -d "$dir" ] || continue
+    local name
+    name=$(basename "$dir")
+    [ "$name" = ".templates" ] && continue
+
+    local size
+    size=$(du -sh "$dir" 2>/dev/null | cut -f1)
+
+    local ide_dir chat_dir ide_ext_count=0 chat_ext_count=0
+    ide_dir="$(ide_extensions_dir "$dir")"
+    chat_dir="$(chat_extensions_dir "$dir")"
+
+    if [ -d "$ide_dir" ]; then
+      ide_ext_count=$(find "$ide_dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
+    if [ -d "$chat_dir" ]; then
+      chat_ext_count=$(find "$chat_dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
+    local ptype="full"
+    [ -f "$dir/.auth-only" ] && ptype="auth-only"
+
+    printf "%-18s %-10s %-12s %-12s %s\n" "$name" "$size" "$ide_ext_count" "$chat_ext_count" "$ptype"
+  done
+
+  echo ""
+  local total
+  total=$(du -sh "$BASE" 2>/dev/null | cut -f1)
+  print_info "Total usage: $total"
+}
+
+update_cli() {
+  local script_url="https://raw.githubusercontent.com/rakibkhanofficial/multigravity-duo/main/multigravity"
+  local target
+  target="$(script_path)"
+
+  if [ -z "$target" ]; then
+    abort "could not determine script path for update"
+  fi
+
+  print_info "Updating multigravity from $script_url ..."
+  if curl -fsSL "$script_url" -o "$target.tmp"; then
+    mv "$target.tmp" "$target"
+    chmod +x "$target"
+    print_info "Successfully updated Multigravity Duo!"
+  else
+    rm -f "$target.tmp"
+    abort "failed to download update"
+  fi
+}
+
+help_completion() {
+  local shell_name
+  shell_name="$(basename "$SHELL")"
+
+  echo "To enable autocompletion, add the following to your shell profile:"
+  echo ""
+  case "$shell_name" in
+    zsh)
+      echo "  # Add to ~/.zshrc"
+      echo '  source <(multigravity completion zsh)'
+      ;;
+    bash)
+      echo "  # Add to ~/.bashrc"
+      echo '  source <(multigravity completion bash)'
+      ;;
+    *)
+      echo "  # Your shell ($shell_name) is not natively supported for completion."
+      ;;
+  esac
+  echo ""
+  echo "Then restart your terminal or run: source ~/.$shell_name""rc"
+}
+
+generate_completion() {
+  local shell_type=$1
+  case "$shell_type" in
+    zsh)
+      cat <<'EOF'
+#compdef multigravity
+_multigravity() {
+    local -a commands
+    commands=(
+        'new:Create a new profile'
+        'ide:Launch Antigravity IDE for a profile'
+        'chat:Launch Antigravity Chat companion for a profile'
+        'all:Launch both IDE and Chat simultaneously'
+        'list:List existing profiles'
+        'status:Show profile status (running, type, last used)'
+        'rename:Rename a profile'
+        'delete:Delete a profile'
+        'clone:Clone an existing profile'
+        'template:Manage profile templates (save, list, delete)'
+        'export:Export a profile to tar.gz'
+        'import:Import a profile from tar.gz'
+        'update:Update Multigravity Duo'
+        'doctor:Run system diagnosis'
+        'stats:Show profile storage usage'
+        'completion:Setup shell completion'
+        'help:Show help'
+    )
+    local curcontext="$curcontext" state line
+    _arguments -C '1: :->command' '*: :->args'
+    case $state in
+        command)
+            _describe -t commands 'multigravity command' commands
+            local -a profiles
+            profiles=($(multigravity list --raw 2>/dev/null))
+            (( ${#profiles} > 0 )) && _describe -t profiles 'profile' profiles
+            ;;
+        args)
+            case $line[1] in
+                rename|delete|clone|help|ide|chat|all)
+                    local -a profiles
+                    profiles=($(multigravity list --raw 2>/dev/null))
+                    (( ${#profiles} > 0 )) && _describe -t profiles 'profile' profiles
+                    ;;
+            esac
+            ;;
+    esac
+}
+_multigravity "$@"
+EOF
+      ;;
+    bash)
+      cat <<'EOF'
+_multigravity_completions() {
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    opts="new ide chat all list status rename delete clone template export import update doctor stats completion help --ide --chat --all"
+
+    if [[ ${COMP_CWORD} -eq 1 ]] ; then
+        local profiles=$(multigravity list --raw 2>/dev/null)
+        COMPREPLY=( $(compgen -W "${opts} ${profiles}" -- ${cur}) )
+        return 0
+    fi
+
+    case "${prev}" in
+        delete|rename|clone|ide|chat|all)
+            local profiles=$(multigravity list --raw 2>/dev/null)
+            COMPREPLY=( $(compgen -W "${profiles}" -- ${cur}) )
+            return 0
+            ;;
+    esac
+}
+complete -F _multigravity_completions multigravity
+EOF
+      ;;
+  esac
+}
+
+# --- Templates ---
+template_save() {
+  local profile=$1
+  local tpl_name=$2
+
+  validate_name "$profile"
+  validate_name "$tpl_name"
+
+  local profile_path
+  profile_path="$(profile_dir "$profile")"
+  if [ ! -d "$profile_path" ]; then
+    abort "profile '$profile' does not exist"
+  fi
+
+  local tpl_dir
+  tpl_dir="$(templates_dir)"
+  local tpl_path="$tpl_dir/$tpl_name"
+
+  if [ -d "$tpl_path" ]; then
+    abort "template '$tpl_name' already exists"
+  fi
+
+  mkdir -p "$tpl_dir"
+  print_info "Saving profile '$profile' as template '$tpl_name'..."
+  cp -R "$profile_path" "$tpl_path"
+  rm -f "$tpl_path/.auth-only"
+
+  print_info "Template '$tpl_name' saved"
+}
+
+template_list() {
+  local tpl_dir
+  tpl_dir="$(templates_dir)"
+
+  echo "Available templates:"
+  if [ ! -d "$tpl_dir" ]; then
+    echo "  (none)"
+    return 0
+  fi
+
+  local found=false
+  for dir in "$tpl_dir"/*; do
+    [ -d "$dir" ] || continue
+    found=true
+    local name size
+    name=$(basename "$dir")
+    size=$(du -sh "$dir" 2>/dev/null | cut -f1)
+    echo "  $name  ($size)"
+  done
+
+  if [ "$found" = false ]; then
+    echo "  (none)"
+  fi
+}
+
+template_delete() {
+  local tpl_name=$1
+  validate_name "$tpl_name"
+
+  local tpl_path
+  tpl_path="$(templates_dir)/$tpl_name"
+
+  if [ ! -d "$tpl_path" ]; then
+    abort "template '$tpl_name' does not exist"
+  fi
+
+  rm -rf "$tpl_path"
+  print_info "Deleted template '$tpl_name'"
+}
+
+# --- Status ---
+status_profiles() {
+  if [ ! -d "$BASE" ]; then
+    print_info "No profiles found."
+    return 0
+  fi
+
+  printf "%-16s %-12s %-12s %-10s %-18s %s\n" "PROFILE" "IDE" "CHAT" "TYPE" "LAST USED" "SIZE"
+  printf "%-16s %-12s %-12s %-10s %-18s %s\n" "-------" "---" "----" "----" "---------" "----"
+
+  for dir in "$BASE"/*; do
+    [ -d "$dir" ] || continue
+    local name
+    name=$(basename "$dir")
+    [ "$name" = ".templates" ] && continue
+
+    local ide_status="stopped"
+    local chat_status="stopped"
+    local ide_data chat_data
+    ide_data="$(ide_user_data_dir "$dir")"
+    chat_data="$(chat_user_data_dir "$dir")"
+
+    if ps -eo args 2>/dev/null | grep -v grep | grep -qF "$ide_data" 2>/dev/null; then
+      ide_status="running"
+    fi
+
+    if ps -eo args 2>/dev/null | grep -v grep | grep -qF "$chat_data" 2>/dev/null; then
+      chat_status="running"
+    fi
+
+    local ptype="full"
+    if [ -f "$dir/.auth-only" ]; then
+      ptype="auth-only"
+    fi
+
+    local last_used="unknown"
+    case "$(platform)" in
+      darwin)
+        last_used=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$dir" 2>/dev/null || echo "unknown")
+        ;;
+      linux)
+        last_used=$(stat -c "%y" "$dir" 2>/dev/null | cut -d'.' -f1 || echo "unknown")
+        ;;
+    esac
+
+    local size
+    size=$(du -sh "$dir" 2>/dev/null | cut -f1)
+
+    local ide_field chat_field
+    if [ "$ide_status" = "running" ]; then
+      ide_field=$(printf "\033[32m%-10s\033[0m" "$ide_status")
+    else
+      ide_field=$(printf "%-10s" "$ide_status")
+    fi
+
+    if [ "$chat_status" = "running" ]; then
+      chat_field=$(printf "\033[32m%-10s\033[0m" "$chat_status")
+    else
+      chat_field=$(printf "%-10s" "$chat_status")
+    fi
+
+    printf "%-16s %b  %b  %-10s %-18s %s\n" "$name" "$ide_field" "$chat_field" "$ptype" "$last_used" "$size"
+  done
+}
+
+# --- Export / Import ---
+export_profile() {
+  local profile=$1
+  local output_path=${2-}
+
+  validate_name "$profile"
+
+  local profile_path
+  profile_path="$(profile_dir "$profile")"
+  if [ ! -d "$profile_path" ]; then
+    abort "profile '$profile' does not exist"
+  fi
+
+  if [ -z "$output_path" ]; then
+    output_path="./${profile}.tar.gz"
+  fi
+
+  print_info "Exporting profile '$profile'..."
+  tar -czf "$output_path" -C "$BASE" "$profile"
+  print_info "Exported to $output_path"
+}
+
+import_profile() {
+  local archive_path=$1
+  local profile=${2-}
+
+  if [ -z "$archive_path" ]; then
+    abort "usage: multigravity import <archive> [profile-name]"
+  fi
+
+  if [ ! -f "$archive_path" ]; then
+    abort "file '$archive_path' not found"
+  fi
+
+  if [ -z "$profile" ]; then
+    profile=$(tar -tzf "$archive_path" 2>/dev/null | head -1 | cut -d'/' -f1)
+    if [ -z "$profile" ]; then
+      abort "could not determine profile name from archive. Specify a name: multigravity import <path> <name>"
+    fi
+  fi
+
+  validate_name "$profile"
+
+  local profile_path
+  profile_path="$(profile_dir "$profile")"
+  if [ -d "$profile_path" ]; then
+    abort "profile '$profile' already exists"
+  fi
+
+  mkdir -p "$BASE"
+  print_info "Importing profile as '$profile'..."
+
+  local top_dir
+  top_dir=$(tar -tzf "$archive_path" 2>/dev/null | head -1 | cut -d'/' -f1)
+
+  if [ "$top_dir" = "$profile" ]; then
+    tar -xzf "$archive_path" -C "$BASE"
+  elif [ -n "$top_dir" ]; then
+    tar -xzf "$archive_path" -C "$BASE"
+    if [ "$top_dir" != "$profile" ] && [ -d "$BASE/$top_dir" ]; then
+      mv "$BASE/$top_dir" "$profile_path"
+    fi
+  else
+    mkdir -p "$profile_path"
+    tar -xzf "$archive_path" -C "$profile_path"
+  fi
+
+  create_shortcuts "$profile"
+  print_info "Imported profile '$profile'"
+}
+
+usage() {
+  cat <<EOF
+Multigravity Duo — Run multiple Antigravity IDE & Antigravity Companion profiles simultaneously.
+
+Usage: multigravity <command|profile> [options] [args...]
+
+Launching:
+  multigravity <profile> [args...]       Launch Antigravity IDE (default)
+  multigravity <profile> --chat [args..] Launch Antigravity Chat (Companion)
+  multigravity <profile> --all [args...] Launch BOTH Antigravity IDE and Chat
+  multigravity ide <profile> [args...]   Shortcut: launch Antigravity IDE
+  multigravity chat <profile> [args...]  Shortcut: launch Antigravity Chat
+  multigravity all <profile> [args...]   Shortcut: launch both simultaneously
+
+Profile Management:
+  multigravity new <name> [options]      Create a profile & desktop shortcuts
+      --auth-only                        Share extensions & settings, isolate logins
+      --from <template>                  Create from a saved template
+  multigravity list                      List existing profiles
+  multigravity status                    Show IDE & Chat running status, type, size
+  multigravity rename <old> <new>        Rename a profile (updates shortcuts)
+  multigravity delete <name>             Delete a profile and its data
+  multigravity clone <src> <dest>        Clone an existing profile
+
+Templates & Portability:
+  multigravity template save <profile> <name>   Save profile as template
+  multigravity template list                    List available templates
+  multigravity template delete <name>           Delete a template
+  multigravity export <name> [path]             Export profile to tar.gz
+  multigravity import <archive> [name]          Import profile from tar.gz
+
+Diagnostics & Setup:
+  multigravity doctor                    Verify Antigravity IDE & Chat environment
+  multigravity stats                     Storage and extension counts per profile
+  multigravity completion [bash|zsh]     Generate shell autocomplete script
+  multigravity update                    Update Multigravity Duo to latest version
+  multigravity help                      Show this help
+
+Environment Variables:
+  MULTIGRAVITY_IDE_APP                   Override Antigravity IDE app path
+  MULTIGRAVITY_CHAT_APP                  Override Antigravity Chat app path
+  MULTIGRAVITY_HOME                      Override profile storage (~/AntigravityProfiles)
+EOF
+}
+
+case "$cmd" in
+  new)
+    shift
+    new_profile "$@"
+    ;;
+  ide)
+    shift
+    [ $# -gt 0 ] || abort "usage: multigravity ide <profile> [args...]"
+    launch_profile "$1" --ide "${@:2}"
+    ;;
+  chat)
+    shift
+    [ $# -gt 0 ] || abort "usage: multigravity chat <profile> [args...]"
+    launch_profile "$1" --chat "${@:2}"
+    ;;
+  all)
+    shift
+    [ $# -gt 0 ] || abort "usage: multigravity all <profile> [args...]"
+    launch_profile "$1" --all "${@:2}"
+    ;;
+  list)
+    list_profiles "${2-}"
+    ;;
+  rename)
+    rename_profile "${2-}" "${3-}"
+    ;;
+  delete)
+    delete_profile "${2-}"
+    ;;
+  clone)
+    clone_profile "${2-}" "${3-}"
+    ;;
+  template)
+    case "${2-}" in
+      save)
+        template_save "${3-}" "${4-}"
+        ;;
+      list)
+        template_list
+        ;;
+      delete)
+        template_delete "${3-}"
+        ;;
+      *)
+        abort "usage: multigravity template <save|list|delete>"
+        ;;
+    esac
+    ;;
+  status)
+    status_profiles
+    ;;
+  export)
+    export_profile "${2-}" "${3-}"
+    ;;
+  import)
+    import_profile "${2-}" "${3-}"
+    ;;
+  update)
+    update_cli
+    ;;
+  doctor)
+    doctor_cli
+    ;;
+  stats)
+    profile_stats
+    ;;
+  completion)
+    if [ -n "${2-}" ]; then
+      generate_completion "$2"
+    else
+      help_completion
+    fi
+    ;;
+  help | --help | -h)
+    usage
+    ;;
+  "")
+    usage
+    exit 1
+    ;;
+  *)
+    launch_profile "$cmd" "${@:2}"
+    ;;
+esac
