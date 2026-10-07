@@ -492,41 +492,8 @@ create_shortcut_darwin_single() {
         cp "$icon_src" "$app_dir/Contents/Resources/Antigravity.icns" 2>/dev/null || true
       fi
 
-      # Update Info.plist with custom Multigravity bundle identity
-      plutil -replace CFBundleName -string "$app_title" "$app_dir/Contents/Info.plist" 2>/dev/null || true
+      # Update Info.plist display name so Finder, Dock & App Switcher display custom profile name
       plutil -replace CFBundleDisplayName -string "$app_title" "$app_dir/Contents/Info.plist" 2>/dev/null || true
-      plutil -replace CFBundleIdentifier -string "$bundle_id" "$app_dir/Contents/Info.plist" 2>/dev/null || true
-
-      # Wrap the internal binary so launching directly from Finder/Dock or CLI uses this profile's paths
-      local macos_dir="$app_dir/Contents/MacOS"
-      local orig_bin=""
-      for b in "$macos_dir"/*; do
-        if [ -f "$b" ] && [ -x "$b" ] && [[ "$b" != *.bin ]]; then
-          orig_bin="$(basename "$b")"
-          break
-        fi
-      done
-
-      if [ -n "$orig_bin" ]; then
-        mv "$macos_dir/$orig_bin" "$macos_dir/$orig_bin.bin"
-        cat <<EOF > "$macos_dir/$orig_bin"
-#!/usr/bin/env bash
-DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-BIN="\$DIR/$orig_bin.bin"
-
-ARGS=()
-if [[ "\$*" != *"--user-data-dir"* ]]; then
-  ARGS+=(--user-data-dir "$data_dir")
-fi
-if [[ "\$*" != *"--extensions-dir"* ]]; then
-  ARGS+=(--extensions-dir "$ext_dir")
-fi
-
-export HOME="$profile_path"
-exec "\$BIN" "\${ARGS[@]}" "\$@"
-EOF
-        chmod +x "$macos_dir/$orig_bin"
-      fi
 
       # Ad-hoc codesign the cloned app bundle so macOS window server and Dock recognize its own icon & identity
       codesign --force --deep --sign - "$app_dir" 2>/dev/null || true
