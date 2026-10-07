@@ -215,6 +215,10 @@ function Create-ShortcutLink {
     $Shortcut.TargetPath = "powershell.exe"
     $Shortcut.Arguments = "-NoProfile -WindowStyle Hidden -Command `"multigravity $PROFILE $Flag`""
     $Shortcut.WorkingDirectory = $PROFILE_DIR
+    $icoPath = "$env:LOCALAPPDATA\Programs\Multigravity\icon.ico"
+    if (Test-Path $icoPath) {
+        $Shortcut.IconLocation = "$icoPath,0"
+    }
     $Shortcut.Save()
 }
 

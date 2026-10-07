@@ -444,15 +444,25 @@ create_shortcut_darwin_single() {
 
   launcher="$(script_path)"
   icon_src="$(dirname "$launcher")/icon.icns"
+  if [ ! -f "$icon_src" ]; then
+    icon_src="$(cd "$(dirname "$0")" && pwd)/icon.icns"
+  fi
+
+  local profile_path data_dir ext_dir
+  profile_path="$(profile_dir "$profile")"
 
   if [ "$app_type" = "ide" ]; then
     app_title="Multigravity $profile IDE"
     bundle_id="com.multigravity.profile.$profile.ide"
     launch_flag="--ide"
+    data_dir="$(ide_user_data_dir "$profile_path")"
+    ext_dir="$(ide_extensions_dir "$profile_path")"
   elif [ "$app_type" = "chat" ]; then
     app_title="Multigravity $profile"
     bundle_id="com.multigravity.profile.$profile.chat"
     launch_flag="--chat"
+    data_dir="$(chat_user_data_dir "$profile_path")"
+    ext_dir="$(chat_extensions_dir "$profile_path")"
   else
     app_title="Multigravity $profile Duo"
     bundle_id="com.multigravity.profile.$profile.duo"
@@ -460,10 +470,75 @@ create_shortcut_darwin_single() {
   fi
 
   app_dir="$(mac_shortcut_path "$profile" "$app_type")"
-  run_script="$app_dir/Contents/MacOS/run"
 
+  if [ "$app_type" = "ide" ] || [ "$app_type" = "chat" ]; then
+    local base_app=""
+    if [ "$app_type" = "ide" ]; then
+      base_app="$(find_ide_app || true)"
+    else
+      base_app="$(find_chat_app || true)"
+    fi
+
+    if [ -n "$base_app" ] && [ -d "$base_app" ]; then
+      rm -rf "$app_dir"
+      mkdir -p "$(dirname "$app_dir")"
+      # Fast APFS copy-on-write clone (takes 0 extra disk space on APFS)
+      cp -c -R "$base_app" "$app_dir" 2>/dev/null || cp -R "$base_app" "$app_dir"
+
+      # Replace application icons in Resources with Multigravity icon
+      if [ -f "$icon_src" ]; then
+        cp "$icon_src" "$app_dir/Contents/Resources/Antigravity IDE.icns" 2>/dev/null || true
+        cp "$icon_src" "$app_dir/Contents/Resources/icon.icns" 2>/dev/null || true
+        cp "$icon_src" "$app_dir/Contents/Resources/Antigravity.icns" 2>/dev/null || true
+      fi
+
+      # Update Info.plist with custom Multigravity bundle identity
+      plutil -replace CFBundleName -string "$app_title" "$app_dir/Contents/Info.plist" 2>/dev/null || true
+      plutil -replace CFBundleDisplayName -string "$app_title" "$app_dir/Contents/Info.plist" 2>/dev/null || true
+      plutil -replace CFBundleIdentifier -string "$bundle_id" "$app_dir/Contents/Info.plist" 2>/dev/null || true
+
+      # Wrap the internal binary so launching directly from Finder/Dock or CLI uses this profile's paths
+      local macos_dir="$app_dir/Contents/MacOS"
+      local orig_bin=""
+      for b in "$macos_dir"/*; do
+        if [ -f "$b" ] && [ -x "$b" ] && [[ "$b" != *.bin ]]; then
+          orig_bin="$(basename "$b")"
+          break
+        fi
+      done
+
+      if [ -n "$orig_bin" ]; then
+        mv "$macos_dir/$orig_bin" "$macos_dir/$orig_bin.bin"
+        cat <<EOF > "$macos_dir/$orig_bin"
+#!/usr/bin/env bash
+DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+BIN="\$DIR/$orig_bin.bin"
+
+ARGS=()
+if [[ "\$*" != *"--user-data-dir"* ]]; then
+  ARGS+=(--user-data-dir "$data_dir")
+fi
+if [[ "\$*" != *"--extensions-dir"* ]]; then
+  ARGS+=(--extensions-dir "$ext_dir")
+fi
+
+export HOME="$profile_path"
+exec "\$BIN" "\${ARGS[@]}" "\$@"
+EOF
+        chmod +x "$macos_dir/$orig_bin"
+      fi
+
+      # Ad-hoc codesign the cloned app bundle so macOS window server and Dock recognize its own icon & identity
+      codesign --force --deep --sign - "$app_dir" 2>/dev/null || true
+      print_info "Native app created: $app_dir (showing Multigravity icon in Dock/App bar)"
+      return 0
+    fi
+  fi
+
+  # Fallback or Duo coordinator launcher
   mkdir -p "$app_dir/Contents/MacOS"
   mkdir -p "$app_dir/Contents/Resources"
+  run_script="$app_dir/Contents/MacOS/run"
 
   cat <<EOF > "$run_script"
 #!/usr/bin/env bash
@@ -496,6 +571,7 @@ EOF
 </dict>
 </plist>
 EOF
+  codesign --force --sign - "$app_dir" 2>/dev/null || true
 
   print_info "Shortcut created: $app_dir"
 }
@@ -509,11 +585,19 @@ create_shortcut_linux_single() {
   local launcher
   local launch_flag
   local app_title
+  local icon_target
 
   launcher_root="$(linux_launcher_dir)"
   launcher_path="$(linux_launcher_path "$profile" "$app_type")"
   desktop_path="$(linux_desktop_path "$profile" "$app_type")"
   launcher="$(script_path)"
+  icon_target="$(dirname "$launcher")/icon.png"
+  if [ ! -f "$icon_target" ]; then
+    icon_target="$HOME/.local/share/multigravity/icon.png"
+  fi
+  if [ ! -f "$icon_target" ]; then
+    icon_target="antigravity"
+  fi
 
   if [ "$app_type" = "ide" ]; then
     app_title="Multigravity $profile (IDE)"
@@ -544,9 +628,10 @@ Type=Application
 Name=$app_title
 Comment=Launch $app_title Antigravity profile
 Exec=$(desktop_quote "$launcher_path") %F
-Icon=antigravity
+Icon=$icon_target
 Terminal=false
 StartupNotify=false
+StartupWMClass=multigravity-$profile-$app_type
 Categories=Development;IDE;Chat;
 EOF
 
@@ -604,11 +689,17 @@ launch_ide_app() {
   local profile=$1
   shift || true
 
-  local profile_path app data_dir ext_dir
+  local profile_path app data_dir ext_dir shortcut_app
   profile_path="$(profile_dir "$profile")"
-  app="$(require_ide_app)"
   data_dir="$(ide_user_data_dir "$profile_path")"
   ext_dir="$(ide_extensions_dir "$profile_path")"
+  shortcut_app="$(mac_shortcut_path "$profile" "ide")"
+
+  if [ "$(platform)" = "darwin" ] && [ -d "$shortcut_app" ]; then
+    app="$shortcut_app"
+  else
+    app="$(require_ide_app)"
+  fi
 
   print_info "Launching Antigravity IDE profile '$profile'..."
 
@@ -637,11 +728,17 @@ launch_chat_app() {
   local profile=$1
   shift || true
 
-  local profile_path app data_dir ext_dir
+  local profile_path app data_dir ext_dir shortcut_app
   profile_path="$(profile_dir "$profile")"
-  app="$(require_chat_app)"
   data_dir="$(chat_user_data_dir "$profile_path")"
   ext_dir="$(chat_extensions_dir "$profile_path")"
+  shortcut_app="$(mac_shortcut_path "$profile" "chat")"
+
+  if [ "$(platform)" = "darwin" ] && [ -d "$shortcut_app" ]; then
+    app="$shortcut_app"
+  else
+    app="$(require_chat_app)"
+  fi
 
   print_info "Launching Antigravity Chat profile '$profile'..."
 

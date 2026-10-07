@@ -44,11 +44,12 @@ print_step "Downloading multigravity CLI..."
 curl -fsSL "$RAW/multigravity" -o "$INSTALL_DIR/multigravity"
 chmod +x "$INSTALL_DIR/multigravity"
 
-# Download macOS icon if darwin
+# Download application icons
 if [ "$PLATFORM" = "darwin" ]; then
   print_step "Downloading application icon..."
   curl -fsSL "$RAW/icon.icns" -o "$INSTALL_DIR/icon.icns" || true
 fi
+curl -fsSL "$RAW/icon.png" -o "$INSTALL_DIR/icon.png" 2>/dev/null || true
 
 echo ""
 echo "✓ Multigravity Duo installed successfully!"

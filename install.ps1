@@ -11,6 +11,7 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Write-Host "Installing Multigravity Duo to $InstallDir..."
 
 Invoke-WebRequest -Uri "$RAW/multigravity.ps1" -OutFile "$InstallDir\multigravity.ps1"
+Invoke-WebRequest -Uri "$RAW/icon.ico" -OutFile "$InstallDir\icon.ico" -ErrorAction SilentlyContinue
 
 # Create a multigravity.cmd wrapper in the folder so it runs easily in cmd/powershell
 $cmdContent = @"
