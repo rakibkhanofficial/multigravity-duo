@@ -214,6 +214,109 @@ multigravity import ~/Desktop/work-backup.tar.gz custom-name
 | `multigravity stats` | Disk space & extension usage breakdown |
 | `multigravity completion [zsh\|bash]` | Generate shell autocomplete scripts |
 | `multigravity update` | Update Multigravity Duo to latest version |
+| `multigravity uninstall` | Uninstall CLI and remove launchers |
+
+---
+
+## 🗑️ Profile Deletion & Uninstallation
+
+If you need to remove individual profiles or completely uninstall Multigravity Duo from your system, follow the steps below:
+
+### 1. Delete Profiles
+
+#### Using Multigravity CLI (Recommended)
+You can delete profiles anytime using the `delete` command. This removes the isolated profile folder, cache, and all associated native desktop launcher shortcuts:
+
+```bash
+# Example: Delete the 'work' and 'personal' profiles
+multigravity delete work
+multigravity delete personal
+
+# Verify remaining profiles
+multigravity list
+```
+
+#### Manual Profile & Shortcut Deletion (macOS, Linux, Windows)
+If you have already removed the CLI or want to manually wipe profile directories and shortcuts:
+
+- **macOS**:
+  ```bash
+  # Delete a specific profile (e.g. work)
+  rm -rf ~/AntigravityProfiles/work
+
+  # Delete all profiles and data
+  rm -rf ~/AntigravityProfiles
+
+  # Delete native launcher shortcuts
+  rm -rf ~/Applications/Multigravity*.app
+  ```
+
+- **Linux**:
+  ```bash
+  # Delete a specific profile (e.g. work)
+  rm -rf ~/AntigravityProfiles/work
+
+  # Delete all profiles and data
+  rm -rf ~/AntigravityProfiles
+
+  # Delete desktop shortcuts and launcher scripts
+  rm -f ~/.local/share/applications/multigravity-*.desktop
+  rm -rf ~/.local/share/multigravity
+  ```
+
+- **Windows (PowerShell)**:
+  ```powershell
+  # Delete a specific profile (e.g. work)
+  Remove-Item -Recurse -Force "$env:USERPROFILE\AntigravityProfiles\work"
+
+  # Delete all profiles and data
+  Remove-Item -Recurse -Force "$env:USERPROFILE\AntigravityProfiles"
+
+  # Delete Start Menu shortcuts
+  Remove-Item -Recurse -Force "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Multigravity"
+  ```
+
+---
+
+### 2. Uninstall Multigravity CLI
+
+If you want to completely remove the Multigravity CLI tool itself:
+
+#### Automated Uninstall Script (One-Liner)
+
+- **macOS & Linux**:
+  ```bash
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/rakibkhanofficial/multigravity-duo/main/uninstall.sh)"
+  ```
+
+- **Windows (PowerShell)**:
+  ```powershell
+  irm https://raw.githubusercontent.com/rakibkhanofficial/multigravity-duo/main/uninstall.ps1 | iex
+  ```
+
+*(Or simply run `multigravity uninstall` if the CLI is already installed in your PATH.)*
+
+#### Manual CLI Removal
+
+- **macOS & Linux**:
+  ```bash
+  # Remove binary and icon from /usr/local/bin
+  sudo rm -f /usr/local/bin/multigravity /usr/local/bin/icon.icns
+
+  # Or if installed in ~/.local/bin:
+  rm -f ~/.local/bin/multigravity ~/.local/bin/icon.icns
+  ```
+
+- **Windows (PowerShell)**:
+  ```powershell
+  # Remove application directory
+  Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\Multigravity"
+
+  # Clean user PATH environment variable
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  $newPath = ($userPath -split ';' | Where-Object { $_ -ne "$env:LOCALAPPDATA\Programs\Multigravity" -and $_ -ne "" }) -join ';'
+  [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+  ```
 
 ---
 

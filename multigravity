@@ -1010,6 +1010,65 @@ update_cli() {
   fi
 }
 
+uninstall_cli() {
+  local confirm
+  read -r -p "Are you sure you want to uninstall Multigravity Duo? [y/N] " confirm
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    print_info "Aborted."
+    return 0
+  fi
+
+  case "$(platform)" in
+    darwin)
+      if ls "$HOME/Applications"/Multigravity*.app 1>/dev/null 2>&1; then
+        print_info "Removing macOS launcher shortcuts..."
+        rm -rf "$HOME/Applications"/Multigravity*.app
+      fi
+      ;;
+    linux)
+      if ls "$HOME/.local/share/applications"/multigravity-*.desktop 1>/dev/null 2>&1; then
+        print_info "Removing Linux desktop shortcuts..."
+        rm -f "$HOME/.local/share/applications"/multigravity-*.desktop
+      fi
+      if [ -d "$HOME/.local/share/multigravity" ]; then
+        rm -rf "$HOME/.local/share/multigravity"
+      fi
+      ;;
+  esac
+
+  if [ -d "$BASE" ]; then
+    read -r -p "Do you also want to permanently delete all profile data in $BASE? [y/N] " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+      rm -rf "$BASE"
+      print_info "Deleted profile directory: $BASE"
+    else
+      print_info "Kept profile directory: $BASE"
+    fi
+  fi
+
+  local target
+  target="$(script_path)"
+  if [ -n "$target" ] && [ -f "$target" ]; then
+    print_info "Removing multigravity CLI binary ($target)..."
+    if [ -w "$target" ]; then
+      rm -f "$target"
+    else
+      sudo rm -f "$target"
+    fi
+    local icon_target
+    icon_target="$(dirname "$target")/icon.icns"
+    if [ -f "$icon_target" ]; then
+      if [ -w "$icon_target" ]; then
+        rm -f "$icon_target"
+      else
+        sudo rm -f "$icon_target" 2>/dev/null || true
+      fi
+    fi
+  fi
+
+  print_info "✓ Multigravity Duo uninstalled successfully!"
+}
+
 help_completion() {
   local shell_name
   shell_name="$(basename "$SHELL")"
@@ -1055,6 +1114,7 @@ _multigravity() {
         'export:Export a profile to tar.gz'
         'import:Import a profile from tar.gz'
         'update:Update Multigravity Duo'
+        'uninstall:Uninstall Multigravity Duo'
         'doctor:Run system diagnosis'
         'stats:Show profile storage usage'
         'completion:Setup shell completion'
@@ -1090,7 +1150,7 @@ _multigravity_completions() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    opts="new ide chat all list status rename delete clone template export import update doctor stats completion help --ide --chat --all"
+    opts="new ide chat all list status rename delete clone template export import update uninstall doctor stats completion help --ide --chat --all"
 
     if [[ ${COMP_CWORD} -eq 1 ]] ; then
         local profiles=$(multigravity list --raw 2>/dev/null)
@@ -1354,6 +1414,7 @@ Diagnostics & Setup:
   multigravity stats                     Storage and extension counts per profile
   multigravity completion [bash|zsh]     Generate shell autocomplete script
   multigravity update                    Update Multigravity Duo to latest version
+  multigravity uninstall                 Uninstall Multigravity Duo and components
   multigravity help                      Show this help
 
 Environment Variables:
@@ -1422,6 +1483,9 @@ case "$cmd" in
     ;;
   update)
     update_cli
+    ;;
+  uninstall)
+    uninstall_cli
     ;;
   doctor)
     doctor_cli

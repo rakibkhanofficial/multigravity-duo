@@ -109,6 +109,7 @@ function Write-Usage {
     Write-Host "  doctor                    Run system diagnosis for IDE & Chat"
     Write-Host "  stats                     Show storage and extension stats per profile"
     Write-Host "  update                    Update Multigravity Duo to latest version"
+    Write-Host "  uninstall                 Uninstall Multigravity Duo and components"
     Write-Host "  help                      Show this help"
     Write-Host ""
     Write-Host "Profile names: alphanumeric and hyphens only (e.g. work, personal, client-1)"
@@ -469,6 +470,47 @@ switch ($cmd) {
         if (Test-Path $BASE) { Write-Host "  [✓] Profile storage: $BASE (available)" } else { Write-Host "  [!] Profile storage: $BASE (not yet created)" }
         Write-Host ""
         Write-Host "Doctor check complete."
+    }
+
+    "uninstall" {
+        $resp = Read-Host "Are you sure you want to uninstall Multigravity Duo? [y/N]"
+        if ($resp -notmatch "^[yY]$") { Write-Host "Aborted."; exit 0 }
+
+        # Remove Start Menu shortcuts
+        $ProgramsFolder = [Environment]::GetFolderPath("Programs")
+        $ShortcutDir = "$ProgramsFolder\Multigravity"
+        if (Test-Path $ShortcutDir) {
+            Remove-Item -Path $ShortcutDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "Removed Start Menu shortcuts."
+        }
+
+        # Check profiles
+        $baseDir = if ($env:MULTIGRAVITY_HOME) { $env:MULTIGRAVITY_HOME } else { "$env:USERPROFILE\AntigravityProfiles" }
+        if (Test-Path $baseDir) {
+            Write-Host ""
+            $pResp = Read-Host "Do you also want to permanently delete all profile data in $baseDir? [y/N]"
+            if ($pResp -match "^[yY]$") {
+                Remove-Item -Path $baseDir -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "Deleted profile directory: $baseDir"
+            } else {
+                Write-Host "Kept profile directory: $baseDir"
+            }
+        }
+
+        # Remove installation dir and PATH
+        $InstallDir = "$env:LOCALAPPDATA\Programs\Multigravity"
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        if ($userPath -like "*$InstallDir*") {
+            $parts = $userPath -split ';' | Where-Object { $_ -ne $InstallDir -and $_ -ne "$InstallDir\" -and $_ -ne "" }
+            $newPath = $parts -join ';'
+            [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+            Write-Host "Removed $InstallDir from user PATH."
+        }
+        if (Test-Path $InstallDir) {
+            Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "Removed $InstallDir."
+        }
+        Write-Host "✓ Multigravity Duo uninstalled successfully!"
     }
 
     default {
