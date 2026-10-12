@@ -26,6 +26,7 @@ Legacy profile switchers only knew how to clone the single older Antigravity app
 - **Flexible Launch Control**: Open just the IDE (`multigravity work`), just the companion chat (`multigravity work --chat`), or spin up both at the same time (`multigravity work --all`).
 - **One-Click Native Shortcuts**: Automatically generates macOS `.app` bundles, Linux `.desktop` entries, and Windows Start Menu shortcuts for each profile.
 - **Ultra-Slim Auth-Only Mode**: Share extensions and settings while isolating only Google accounts and authentication tokens (~2 MB vs ~500 MB).
+- **Full Global Resource & Skill Inheritance**: Profiles isolate accounts and workspace state while automatically sharing your global skills, plugins (`~/.gemini/config/plugins`), MCP servers, SSH keys/config (`~/.ssh`), Git identity (`~/.gitconfig`), shell environment (`~/.zshrc`), and workspace folders (`Desktop`, `Documents`, `Downloads`).
 
 ---
 
@@ -211,6 +212,7 @@ multigravity import ~/Desktop/work-backup.tar.gz custom-name
 | `multigravity export <name> [path]` | Export profile to portable archive |
 | `multigravity import <archive> [name]` | Import profile from archive |
 | `multigravity doctor` | Diagnose paths, binaries, and environment |
+| `multigravity repair [name]` | Sync global skills, SSH, Git, folders & shortcuts |
 | `multigravity stats` | Disk space & extension usage breakdown |
 | `multigravity completion [zsh\|bash]` | Generate shell autocomplete scripts |
 | `multigravity update` | Update Multigravity Duo to latest version |

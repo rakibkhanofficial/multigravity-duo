@@ -3,7 +3,8 @@ set -euo pipefail
 
 shopt -s nullglob 2>/dev/null || true
 
-BASE="${MULTIGRAVITY_HOME:-$HOME/AntigravityProfiles}"
+REAL_HOME="${REAL_USER_HOME:-${HOME}}"
+BASE="${MULTIGRAVITY_HOME:-$REAL_HOME/AntigravityProfiles}"
 cmd="${1-}"
 
 abort() {
@@ -62,16 +63,16 @@ ide_extensions_dir() {
 default_ide_user_data_dir() {
   case "$(platform)" in
     darwin)
-      printf '%s/Library/Application Support/Antigravity IDE\n' "$HOME"
+      printf '%s/Library/Application Support/Antigravity IDE\n' "$REAL_HOME"
       ;;
     linux)
-      printf '%s/.config/Antigravity IDE\n' "$HOME"
+      printf '%s/.config/Antigravity IDE\n' "$REAL_HOME"
       ;;
   esac
 }
 
 default_ide_extensions_dir() {
-  printf '%s/.antigravity-ide/extensions\n' "$HOME"
+  printf '%s/.antigravity-ide/extensions\n' "$REAL_HOME"
 }
 
 # --- Chat (Antigravity Companion) Paths ---
@@ -95,16 +96,16 @@ chat_extensions_dir() {
 default_chat_user_data_dir() {
   case "$(platform)" in
     darwin)
-      printf '%s/Library/Application Support/Antigravity\n' "$HOME"
+      printf '%s/Library/Application Support/Antigravity\n' "$REAL_HOME"
       ;;
     linux)
-      printf '%s/.config/Antigravity\n' "$HOME"
+      printf '%s/.config/Antigravity\n' "$REAL_HOME"
       ;;
   esac
 }
 
 default_chat_extensions_dir() {
-  printf '%s/.antigravity/extensions\n' "$HOME"
+  printf '%s/.antigravity/extensions\n' "$REAL_HOME"
 }
 
 templates_dir() {
@@ -116,7 +117,7 @@ is_auth_only() {
 }
 
 linux_launcher_dir() {
-  printf '%s/.local/share/multigravity/launchers\n' "$HOME"
+  printf '%s/.local/share/multigravity/launchers\n' "$REAL_HOME"
 }
 
 linux_launcher_path() {
@@ -133,11 +134,11 @@ linux_launcher_path() {
 linux_desktop_path() {
   local target_app=${2:-ide}
   if [ "$target_app" = "ide" ]; then
-    printf '%s/.local/share/applications/multigravity-%s-ide.desktop\n' "$HOME" "$1"
+    printf '%s/.local/share/applications/multigravity-%s-ide.desktop\n' "$REAL_HOME" "$1"
   elif [ "$target_app" = "chat" ]; then
-    printf '%s/.local/share/applications/multigravity-%s-chat.desktop\n' "$HOME" "$1"
+    printf '%s/.local/share/applications/multigravity-%s-chat.desktop\n' "$REAL_HOME" "$1"
   else
-    printf '%s/.local/share/applications/multigravity-%s-duo.desktop\n' "$HOME" "$1"
+    printf '%s/.local/share/applications/multigravity-%s-duo.desktop\n' "$REAL_HOME" "$1"
   fi
 }
 
@@ -145,11 +146,11 @@ mac_shortcut_path() {
   local profile=$1
   local target_app=${2:-ide}
   if [ "$target_app" = "ide" ]; then
-    printf '%s/Applications/Multigravity %s IDE.app\n' "$HOME" "$profile"
+    printf '%s/Applications/Multigravity %s IDE.app\n' "$REAL_HOME" "$profile"
   elif [ "$target_app" = "chat" ]; then
-    printf '%s/Applications/Multigravity %s.app\n' "$HOME" "$profile"
+    printf '%s/Applications/Multigravity %s.app\n' "$REAL_HOME" "$profile"
   else
-    printf '%s/Applications/Multigravity %s Duo.app\n' "$HOME" "$profile"
+    printf '%s/Applications/Multigravity %s Duo.app\n' "$REAL_HOME" "$profile"
   fi
 }
 
@@ -199,7 +200,7 @@ find_ide_app() {
     darwin)
       for candidate in \
         "/Applications/Antigravity IDE.app" \
-        "$HOME/Applications/Antigravity IDE.app"
+        "$REAL_HOME/Applications/Antigravity IDE.app"
       do
         if [ -d "$candidate" ]; then
           printf '%s\n' "$candidate"
@@ -213,8 +214,8 @@ find_ide_app() {
         "/usr/share/antigravity-ide/antigravity-ide" \
         "/usr/bin/antigravity-ide" \
         "/usr/local/bin/antigravity-ide" \
-        "$HOME/.local/bin/antigravity-ide" \
-        "$HOME/Applications/Antigravity-IDE.AppImage"
+        "$REAL_HOME/.local/bin/antigravity-ide" \
+        "$REAL_HOME/Applications/Antigravity-IDE.AppImage"
       do
         if command_or_path "$candidate" >/dev/null 2>&1; then
           command_or_path "$candidate"
@@ -241,7 +242,7 @@ find_chat_app() {
     darwin)
       for candidate in \
         "/Applications/Antigravity.app" \
-        "$HOME/Applications/Antigravity.app"
+        "$REAL_HOME/Applications/Antigravity.app"
       do
         if [ -d "$candidate" ]; then
           printf '%s\n' "$candidate"
@@ -255,8 +256,8 @@ find_chat_app() {
         "/usr/share/antigravity/antigravity" \
         "/usr/bin/antigravity" \
         "/usr/local/bin/antigravity" \
-        "$HOME/.local/bin/antigravity" \
-        "$HOME/Applications/Antigravity.AppImage"
+        "$REAL_HOME/.local/bin/antigravity" \
+        "$REAL_HOME/Applications/Antigravity.AppImage"
       do
         if command_or_path "$candidate" >/dev/null 2>&1; then
           command_or_path "$candidate"
@@ -299,6 +300,164 @@ require_chat_app() {
   printf '%s\n' "$app"
 }
 
+setup_ssh_symlink() {
+  local profile_path=$1
+  local real_ssh="$REAL_HOME/.ssh"
+
+  if [ ! -d "$real_ssh" ]; then
+    mkdir -p "$real_ssh"
+    chmod 700 "$real_ssh"
+  fi
+
+  if [ -L "$profile_path/.ssh" ]; then
+    local current_target
+    current_target="$(readlink "$profile_path/.ssh" 2>/dev/null || true)"
+    if [ "$current_target" != "$real_ssh" ]; then
+      rm -f "$profile_path/.ssh"
+      ln -s "$real_ssh" "$profile_path/.ssh"
+    fi
+  elif [ -d "$profile_path/.ssh" ]; then
+    # Merge any files from profile .ssh into real_ssh if not already present
+    for f in "$profile_path/.ssh"/*; do
+      [ -e "$f" ] || continue
+      local fname
+      fname="$(basename "$f")"
+      if [ ! -e "$real_ssh/$fname" ]; then
+        cp -p "$f" "$real_ssh/$fname" 2>/dev/null || true
+      fi
+    done
+    rm -rf "$profile_path/.ssh"
+    ln -s "$real_ssh" "$profile_path/.ssh"
+  else
+    rm -f "$profile_path/.ssh" 2>/dev/null || true
+    ln -s "$real_ssh" "$profile_path/.ssh"
+  fi
+}
+
+setup_git_symlink() {
+  local profile_path=$1
+  if [ -f "$REAL_HOME/.gitconfig" ] && [ ! -e "$profile_path/.gitconfig" ]; then
+    ln -s "$REAL_HOME/.gitconfig" "$profile_path/.gitconfig"
+  fi
+}
+
+setup_gemini_skills_and_plugins() {
+  local profile_path=$1
+  local real_gemini="$REAL_HOME/.gemini"
+
+  [ -d "$real_gemini" ] || return 0
+
+  mkdir -p "$profile_path/.gemini/config"
+  mkdir -p "$profile_path/.gemini/antigravity-ide"
+
+  # 1. Share installed plugins and skills
+  if [ -d "$real_gemini/config/plugins" ]; then
+    if [ ! -e "$profile_path/.gemini/config/plugins" ]; then
+      ln -s "$real_gemini/config/plugins" "$profile_path/.gemini/config/plugins"
+    elif [ -d "$profile_path/.gemini/config/plugins" ] && [ ! -L "$profile_path/.gemini/config/plugins" ]; then
+      for p in "$real_gemini/config/plugins"/*; do
+        [ -e "$p" ] || continue
+        local pname
+        pname="$(basename "$p")"
+        if [ ! -e "$profile_path/.gemini/config/plugins/$pname" ]; then
+          ln -s "$p" "$profile_path/.gemini/config/plugins/$pname"
+        fi
+      done
+    fi
+  fi
+
+  # 2. Share MCP config if missing or empty
+  if [ -f "$real_gemini/config/mcp_config.json" ]; then
+    if [ ! -e "$profile_path/.gemini/config/mcp_config.json" ] || [ ! -s "$profile_path/.gemini/config/mcp_config.json" ]; then
+      rm -f "$profile_path/.gemini/config/mcp_config.json" 2>/dev/null || true
+      ln -s "$real_gemini/config/mcp_config.json" "$profile_path/.gemini/config/mcp_config.json"
+    fi
+  fi
+
+  # 3. Share builtin skills & MCP tools
+  if [ -d "$real_gemini/antigravity-ide/builtin" ] && [ ! -e "$profile_path/.gemini/antigravity-ide/builtin" ]; then
+    ln -s "$real_gemini/antigravity-ide/builtin" "$profile_path/.gemini/antigravity-ide/builtin"
+  fi
+  if [ -d "$real_gemini/antigravity-ide/mcp" ] && [ ! -e "$profile_path/.gemini/antigravity-ide/mcp" ]; then
+    ln -s "$real_gemini/antigravity-ide/mcp" "$profile_path/.gemini/antigravity-ide/mcp"
+  fi
+  if [ -d "$real_gemini/antigravity-ide/knowledge" ] && [ ! -e "$profile_path/.gemini/antigravity-ide/knowledge" ]; then
+    ln -s "$real_gemini/antigravity-ide/knowledge" "$profile_path/.gemini/antigravity-ide/knowledge"
+  fi
+}
+
+setup_global_folders_symlink() {
+  local profile_path=$1
+
+  # Direct link to original home folder
+  if [ ! -e "$profile_path/home" ] && [ -d "$REAL_HOME" ]; then
+    ln -s "$REAL_HOME" "$profile_path/home"
+  fi
+
+  # Standard user workspace and content folders
+  for folder in Desktop Documents Downloads Pictures Movies Music Public Projects Development workspace code; do
+    if [ -d "$REAL_HOME/$folder" ] && [ ! -e "$profile_path/$folder" ]; then
+      ln -s "$REAL_HOME/$folder" "$profile_path/$folder"
+    fi
+  done
+}
+
+setup_shell_and_tool_configs() {
+  local profile_path=$1
+
+  # Shell dotfiles for seamless terminal and environment
+  for dotfile in .zshrc .zprofile .zshenv .bashrc .bash_profile .profile .npmrc .wakatime.cfg .claude.json; do
+    if [ -f "$REAL_HOME/$dotfile" ] && [ ! -e "$profile_path/$dotfile" ]; then
+      ln -s "$REAL_HOME/$dotfile" "$profile_path/$dotfile"
+    fi
+  done
+
+  # Global tool and environment directories
+  for tooldir in .nvm .gnupg .aws .docker .orbstack; do
+    if [ -d "$REAL_HOME/$tooldir" ] && [ ! -e "$profile_path/$tooldir" ]; then
+      ln -s "$REAL_HOME/$tooldir" "$profile_path/$tooldir"
+    fi
+  done
+
+  # Global .config sharing (excluding Antigravity profile dirs)
+  if [ -d "$REAL_HOME/.config" ]; then
+    mkdir -p "$profile_path/.config"
+    for citem in "$REAL_HOME/.config"/*; do
+      [ -e "$citem" ] || continue
+      local cname
+      cname="$(basename "$citem")"
+      case "$cname" in
+        "Antigravity"* | "antigravity"*)
+          ;;
+        *)
+          if [ ! -e "$profile_path/.config/$cname" ]; then
+            ln -s "$citem" "$profile_path/.config/$cname"
+          fi
+          ;;
+      esac
+    done
+  fi
+}
+
+setup_profile_shared_resources() {
+  local profile_path=$1
+
+  # 1. SSH configuration and keys for Remote SSH / VM access
+  setup_ssh_symlink "$profile_path"
+
+  # 2. Git global config for developer identity & commits
+  setup_git_symlink "$profile_path"
+
+  # 3. Gemini skills, plugins, MCP servers, and builtin tools
+  setup_gemini_skills_and_plugins "$profile_path"
+
+  # 4. Global developer folders (Desktop, Documents, Downloads, etc.)
+  setup_global_folders_symlink "$profile_path"
+
+  # 5. Shell and developer tool configurations (.zshrc, .config, .nvm, etc.)
+  setup_shell_and_tool_configs "$profile_path"
+}
+
 create_profile_layout() {
   local profile_path=$1
 
@@ -312,8 +471,8 @@ create_profile_layout() {
       mkdir -p "$profile_path/Library/Application Support/Antigravity IDE"
       mkdir -p "$profile_path/Library/Application Support/Antigravity"
 
-      if [ ! -e "$profile_path/Library/Keychains" ] && [ -d "$HOME/Library/Keychains" ]; then
-        ln -s "$HOME/Library/Keychains" "$profile_path/Library/Keychains"
+      if [ ! -e "$profile_path/Library/Keychains" ] && [ -d "$REAL_HOME/Library/Keychains" ]; then
+        ln -s "$REAL_HOME/Library/Keychains" "$profile_path/Library/Keychains"
       fi
       ;;
     linux)
@@ -325,6 +484,8 @@ create_profile_layout() {
         "$profile_path/.local/state"
       ;;
   esac
+
+  setup_profile_shared_resources "$profile_path"
 }
 
 create_auth_only_layout() {
@@ -392,8 +553,8 @@ create_auth_only_layout() {
   case "$(platform)" in
     darwin)
       mkdir -p "$profile_path/Library/Application Support"
-      if [ ! -e "$profile_path/Library/Keychains" ] && [ -d "$HOME/Library/Keychains" ]; then
-        ln -s "$HOME/Library/Keychains" "$profile_path/Library/Keychains"
+      if [ ! -e "$profile_path/Library/Keychains" ] && [ -d "$REAL_HOME/Library/Keychains" ]; then
+        ln -s "$REAL_HOME/Library/Keychains" "$profile_path/Library/Keychains"
       fi
       ;;
     linux)
@@ -403,6 +564,8 @@ create_auth_only_layout() {
         "$profile_path/.local/state"
       ;;
   esac
+
+  setup_profile_shared_resources "$profile_path"
 }
 
 script_path() {
@@ -447,6 +610,9 @@ create_shortcut_darwin_single() {
   if [ ! -f "$icon_src" ]; then
     icon_src="$(cd "$(dirname "$0")" && pwd)/icon.icns"
   fi
+  if [ ! -f "$icon_src" ]; then
+    icon_src="$REAL_HOME/.local/bin/icon.icns"
+  fi
 
   local profile_path data_dir ext_dir
   profile_path="$(profile_dir "$profile")"
@@ -471,38 +637,7 @@ create_shortcut_darwin_single() {
 
   app_dir="$(mac_shortcut_path "$profile" "$app_type")"
 
-  if [ "$app_type" = "ide" ] || [ "$app_type" = "chat" ]; then
-    local base_app=""
-    if [ "$app_type" = "ide" ]; then
-      base_app="$(find_ide_app || true)"
-    else
-      base_app="$(find_chat_app || true)"
-    fi
-
-    if [ -n "$base_app" ] && [ -d "$base_app" ]; then
-      rm -rf "$app_dir"
-      mkdir -p "$(dirname "$app_dir")"
-      # Fast APFS copy-on-write clone (takes 0 extra disk space on APFS)
-      cp -c -R "$base_app" "$app_dir" 2>/dev/null || cp -R "$base_app" "$app_dir"
-
-      # Replace application icons in Resources with Multigravity icon
-      if [ -f "$icon_src" ]; then
-        cp "$icon_src" "$app_dir/Contents/Resources/Antigravity IDE.icns" 2>/dev/null || true
-        cp "$icon_src" "$app_dir/Contents/Resources/icon.icns" 2>/dev/null || true
-        cp "$icon_src" "$app_dir/Contents/Resources/Antigravity.icns" 2>/dev/null || true
-      fi
-
-      # Update Info.plist display name so Finder, Dock & App Switcher display custom profile name
-      plutil -replace CFBundleDisplayName -string "$app_title" "$app_dir/Contents/Info.plist" 2>/dev/null || true
-
-      # Ad-hoc codesign the cloned app bundle so macOS window server and Dock recognize its own icon & identity
-      codesign --force --deep --sign - "$app_dir" 2>/dev/null || true
-      print_info "Native app created: $app_dir (showing Multigravity icon in Dock/App bar)"
-      return 0
-    fi
-  fi
-
-  # Fallback or Duo coordinator launcher
+  rm -rf "$app_dir"
   mkdir -p "$app_dir/Contents/MacOS"
   mkdir -p "$app_dir/Contents/Resources"
   run_script="$app_dir/Contents/MacOS/run"
@@ -510,13 +645,15 @@ create_shortcut_darwin_single() {
   cat <<EOF > "$run_script"
 #!/usr/bin/env bash
 export MULTIGRAVITY_HOME=$(shell_quote "$BASE")
+export SSH_AUTH_SOCK="\${SSH_AUTH_SOCK:-}"
+export SSH_AGENT_PID="\${SSH_AGENT_PID:-}"
 exec $(shell_quote "$launcher") $(shell_quote "$profile") "$launch_flag" "\$@"
 EOF
 
   chmod +x "$run_script"
 
   if [ -f "$icon_src" ]; then
-    cp "$icon_src" "$app_dir/Contents/Resources/icon.icns"
+    cp "$icon_src" "$app_dir/Contents/Resources/icon.icns" 2>/dev/null || true
   fi
 
   cat <<EOF > "$app_dir/Contents/Info.plist"
@@ -533,12 +670,19 @@ EOF
   <string>$bundle_id</string>
   <key>CFBundleName</key>
   <string>$app_title</string>
+  <key>CFBundleDisplayName</key>
+  <string>$app_title</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>LSUIElement</key>
+  <string>0</string>
 </dict>
 </plist>
 EOF
+
   codesign --force --sign - "$app_dir" 2>/dev/null || true
+  xattr -cr "$app_dir" 2>/dev/null || true
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app_dir" 2>/dev/null || true
 
   print_info "Shortcut created: $app_dir"
 }
@@ -656,29 +800,28 @@ launch_ide_app() {
   local profile=$1
   shift || true
 
-  local profile_path app data_dir ext_dir shortcut_app
+  local profile_path app data_dir ext_dir
   profile_path="$(profile_dir "$profile")"
   data_dir="$(ide_user_data_dir "$profile_path")"
   ext_dir="$(ide_extensions_dir "$profile_path")"
-  shortcut_app="$(mac_shortcut_path "$profile" "ide")"
-
-  if [ "$(platform)" = "darwin" ] && [ -d "$shortcut_app" ]; then
-    app="$shortcut_app"
-  else
-    app="$(require_ide_app)"
-  fi
+  app="$(require_ide_app)"
 
   print_info "Launching Antigravity IDE profile '$profile'..."
 
   case "$(platform)" in
     darwin)
-      HOME="$profile_path" open -n "$app" --args \
+      HOME="$profile_path" \
+      SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+      SSH_AGENT_PID="${SSH_AGENT_PID:-}" \
+      open -n "$app" --args \
         --user-data-dir "$data_dir" \
         --extensions-dir "$ext_dir" \
         "$@"
       ;;
     linux)
       HOME="$profile_path" \
+      SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+      SSH_AGENT_PID="${SSH_AGENT_PID:-}" \
       XDG_CONFIG_HOME="$profile_path/.config" \
       XDG_CACHE_HOME="$profile_path/.cache" \
       XDG_DATA_HOME="$profile_path/.local/share" \
@@ -695,29 +838,28 @@ launch_chat_app() {
   local profile=$1
   shift || true
 
-  local profile_path app data_dir ext_dir shortcut_app
+  local profile_path app data_dir ext_dir
   profile_path="$(profile_dir "$profile")"
   data_dir="$(chat_user_data_dir "$profile_path")"
   ext_dir="$(chat_extensions_dir "$profile_path")"
-  shortcut_app="$(mac_shortcut_path "$profile" "chat")"
-
-  if [ "$(platform)" = "darwin" ] && [ -d "$shortcut_app" ]; then
-    app="$shortcut_app"
-  else
-    app="$(require_chat_app)"
-  fi
+  app="$(require_chat_app)"
 
   print_info "Launching Antigravity Chat profile '$profile'..."
 
   case "$(platform)" in
     darwin)
-      HOME="$profile_path" open -n "$app" --args \
+      HOME="$profile_path" \
+      SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+      SSH_AGENT_PID="${SSH_AGENT_PID:-}" \
+      open -n "$app" --args \
         --user-data-dir "$data_dir" \
         --extensions-dir "$ext_dir" \
         "$@"
       ;;
     linux)
       HOME="$profile_path" \
+      SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-}" \
+      SSH_AGENT_PID="${SSH_AGENT_PID:-}" \
       XDG_CONFIG_HOME="$profile_path/.config" \
       XDG_CACHE_HOME="$profile_path/.cache" \
       XDG_DATA_HOME="$profile_path/.local/share" \
@@ -765,6 +907,17 @@ launch_profile() {
     create_auth_only_layout "$profile_path"
   else
     create_profile_layout "$profile_path"
+  fi
+
+  # Auto-upgrade any legacy cloned shortcuts on macOS
+  if [ "$(platform)" = "darwin" ]; then
+    local ide_shortcut chat_shortcut
+    ide_shortcut="$(mac_shortcut_path "$profile" "ide")"
+    chat_shortcut="$(mac_shortcut_path "$profile" "chat")"
+    if { [ -d "$ide_shortcut" ] && [ ! -f "$ide_shortcut/Contents/MacOS/run" ]; } || \
+       { [ -d "$chat_shortcut" ] && [ ! -f "$chat_shortcut/Contents/MacOS/run" ]; }; then
+      create_shortcuts "$profile"
+    fi
   fi
 
   case "$target_mode" in
@@ -998,6 +1151,24 @@ doctor_cli() {
     echo "  [!] Profile storage: $BASE (Not yet created)"
   fi
 
+  # 7. SSH Configuration (Remote SSH / VMs)
+  if [ -d "$REAL_HOME/.ssh" ]; then
+    local ssh_hosts=0
+    if [ -f "$REAL_HOME/.ssh/config" ]; then
+      ssh_hosts=$(grep -c -i "^Host " "$REAL_HOME/.ssh/config" 2>/dev/null || echo 0)
+    fi
+    echo "  [✓] SSH Environment: $REAL_HOME/.ssh ($ssh_hosts host(s) configured in ssh_config)"
+  else
+    echo "  [!] SSH Directory: $REAL_HOME/.ssh not found (SSH config will be created on demand)"
+  fi
+
+  # 8. Antigravity Skills & Plugins
+  if [ -d "$REAL_HOME/.gemini/config/plugins" ]; then
+    local plugin_count
+    plugin_count=$(find "$REAL_HOME/.gemini/config/plugins" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+    echo "  [✓] Antigravity Skills & Plugins: $plugin_count plugin(s) found in $REAL_HOME/.gemini/config/plugins"
+  fi
+
   echo ""
   if [ $errors -eq 0 ]; then
     if [ $warnings -eq 0 ]; then
@@ -1052,6 +1223,41 @@ profile_stats() {
   local total
   total=$(du -sh "$BASE" 2>/dev/null | cut -f1)
   print_info "Total usage: $total"
+}
+
+repair_profile() {
+  local target=${1-}
+  if [ -n "$target" ]; then
+    local ppath
+    ppath="$(profile_dir "$target")"
+    [ -d "$ppath" ] || abort "profile '$target' does not exist"
+    print_info "Repairing profile '$target' and updating shortcuts..."
+    if is_auth_only "$target"; then
+      create_auth_only_layout "$ppath"
+    else
+      create_profile_layout "$ppath"
+    fi
+    create_shortcuts "$target"
+    print_info "✓ Profile '$target' repaired successfully."
+  else
+    print_info "Repairing and updating all existing profiles and shortcuts..."
+    local count=0
+    for dir in "$BASE"/*; do
+      [ -d "$dir" ] || continue
+      local name
+      name=$(basename "$dir")
+      [ "$name" = ".templates" ] && continue
+      print_info "  → Syncing profile '$name'..."
+      if is_auth_only "$name"; then
+        create_auth_only_layout "$dir"
+      else
+        create_profile_layout "$dir"
+      fi
+      create_shortcuts "$name"
+      count=$((count + 1))
+    done
+    print_info "✓ $count profile(s) repaired and updated."
+  fi
 }
 
 update_cli() {
@@ -1214,7 +1420,7 @@ _multigravity_completions() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    opts="new ide chat all list status rename delete clone template export import update uninstall doctor stats completion help --ide --chat --all"
+    opts="new ide chat all list status rename delete clone template export import repair update uninstall doctor stats completion help --ide --chat --all"
 
     if [[ ${COMP_CWORD} -eq 1 ]] ; then
         local profiles=$(multigravity list --raw 2>/dev/null)
@@ -1475,6 +1681,7 @@ Templates & Portability:
 
 Diagnostics & Setup:
   multigravity doctor                    Verify Antigravity IDE & Chat environment
+  multigravity repair [name]             Repair/sync global resources & shortcuts
   multigravity stats                     Storage and extension counts per profile
   multigravity completion [bash|zsh]     Generate shell autocomplete script
   multigravity update                    Update Multigravity Duo to latest version
@@ -1544,6 +1751,10 @@ case "$cmd" in
     ;;
   import)
     import_profile "${2-}" "${3-}"
+    ;;
+  repair)
+    shift
+    repair_profile "${1-}"
     ;;
   update)
     update_cli

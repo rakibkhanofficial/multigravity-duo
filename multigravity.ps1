@@ -127,6 +127,54 @@ function Validate-Name {
     }
 }
 
+function Invoke-SetupSharedResources {
+    param($PROFILE_DIR)
+
+    # 1. SSH configuration & keys for Remote VMs
+    $realSsh = "$env:USERPROFILE\.ssh"
+    $profSsh = "$PROFILE_DIR\.ssh"
+    if (Test-Path $realSsh) {
+        if (!(Test-Path $profSsh)) {
+            New-Item -ItemType SymbolicLink -Path $profSsh -Target $realSsh -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
+
+    # 2. Git config
+    $realGit = "$env:USERPROFILE\.gitconfig"
+    $profGit = "$PROFILE_DIR\.gitconfig"
+    if ((Test-Path $realGit) -and !(Test-Path $profGit)) {
+        New-Item -ItemType SymbolicLink -Path $profGit -Target $realGit -ErrorAction SilentlyContinue | Out-Null
+    }
+
+    # 3. Gemini skills & plugins
+    $realPlugins = "$env:USERPROFILE\.gemini\config\plugins"
+    $profPlugins = "$PROFILE_DIR\.gemini\config\plugins"
+    if (Test-Path $realPlugins) {
+        New-Item -ItemType Directory -Force -Path "$PROFILE_DIR\.gemini\config" | Out-Null
+        if (!(Test-Path $profPlugins)) {
+            New-Item -ItemType SymbolicLink -Path $profPlugins -Target $realPlugins -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
+
+    # 4. User folders (Desktop, Documents, Downloads, etc.)
+    foreach ($folder in @("Desktop", "Documents", "Downloads", "Pictures", "Projects", "Development")) {
+        $realFolder = "$env:USERPROFILE\$folder"
+        $profFolder = "$PROFILE_DIR\$folder"
+        if ((Test-Path $realFolder) -and !(Test-Path $profFolder)) {
+            New-Item -ItemType SymbolicLink -Path $profFolder -Target $realFolder -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
+
+    # 5. Developer tools & configs (.aws, .docker, etc.)
+    foreach ($tooldir in @(".aws", ".docker")) {
+        $realTool = "$env:USERPROFILE\$tooldir"
+        $profTool = "$PROFILE_DIR\$tooldir"
+        if ((Test-Path $realTool) -and !(Test-Path $profTool)) {
+            New-Item -ItemType SymbolicLink -Path $profTool -Target $realTool -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
+}
+
 function Invoke-CreateProfileLayout {
     param($PROFILE)
     $PROFILE_DIR = "$BASE\$PROFILE"
@@ -137,6 +185,8 @@ function Invoke-CreateProfileLayout {
     New-Item -ItemType Directory -Force -Path "$PROFILE_DIR\AppData\Roaming\Antigravity" | Out-Null
     New-Item -ItemType Directory -Force -Path "$PROFILE_DIR\AppData\Local" | Out-Null
     New-Item -ItemType Directory -Force -Path "$PROFILE_DIR\.gemini" | Out-Null
+
+    Invoke-SetupSharedResources $PROFILE_DIR
 }
 
 function Invoke-CreateAuthOnlyProfile {
@@ -197,6 +247,8 @@ function Invoke-CreateAuthOnlyProfile {
     } else {
         New-Item -ItemType Directory -Force -Path $chatExtDir | Out-Null
     }
+
+    Invoke-SetupSharedResources $PROFILE_DIR
 }
 
 function Create-ShortcutLink {
